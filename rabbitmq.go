@@ -38,10 +38,7 @@ type rabbitMqClient struct {
  * RabbitMqOption选项
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type RabbitMqOption struct {
-	Username  string
-	Password  string
-	Host      string
-	Port      int
+	Server    ServerOption
 	Vhost     string
 	IsDurable bool
 }
@@ -219,10 +216,10 @@ func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args 
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (c *rabbitMqClient) openConnection() error {
 	connectionString := fmt.Sprintf("amqp://%s:%s@%s:%d%s",
-		c.option.Username,
-		c.option.Password,
-		c.option.Host,
-		c.option.Port,
+		c.option.Server.Username,
+		c.option.Server.Password,
+		c.option.Server.Host,
+		c.option.Server.Port,
 		c.option.Vhost,
 	)
 
