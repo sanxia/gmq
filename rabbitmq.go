@@ -10,7 +10,7 @@ import (
 )
 
 /* ================================================================================
- * Rabbitmq Client
+ * Rabbitmq Message Queue Client
  * qq group: 582452342
  * email   : 2091938785@qq.com
  * author  : 美丽的地球啊 - mliu
