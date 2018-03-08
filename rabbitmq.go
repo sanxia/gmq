@@ -2,7 +2,9 @@ package gmq
 
 import (
 	"fmt"
+	"log"
 	"strings"
+	"time"
 )
 
 import (
@@ -225,10 +227,14 @@ func (c *rabbitMqClient) openConnection() error {
 
 	connection, err := amqp.Dial(connectionString)
 	if err != nil {
-		return err
-	}
+		//每隔5秒重试连接
+		log.Printf("amqp.Dial error: %v", err)
+		time.Sleep(5 * time.Second)
 
-	c.connection = connection
+		c.openConnection()
+	} else {
+		c.connection = connection
+	}
 
 	return nil
 }
