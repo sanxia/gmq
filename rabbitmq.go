@@ -81,7 +81,7 @@ func isExchangeType(exchangeType string) bool {
  * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (c *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string) error {
-	//connection to server
+	//连接服务器
 	err := c.openConnection()
 	if err != nil {
 		return err
@@ -98,9 +98,9 @@ func (c *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 	}
 
 	err = channel.ExchangeDeclare(
-		exchange,           // name
-		exchangeType,       // type
-		c.option.IsDurable, // durable
+		exchange,           // 交换机名称
+		exchangeType,       // 交换机类型
+		c.option.IsDurable, // 是否持久化
 		false,              // auto-deleted
 		false,              // internal
 		false,              // noWait
@@ -111,13 +111,13 @@ func (c *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 	}
 
 	err = channel.Publish(
-		exchange,   // exchange
-		routingKey, // routing key
+		exchange,   // 交换机名称
+		routingKey, // 路由键
 		false,      // mandatory
 		false,      // immediate
 		amqp.Publishing{
 			ContentType:  "text/plain",
-			Body:         []byte(body),
+			Body:         []byte(body),   //消息体内容
 			DeliveryMode: amqp.Transient, // 1=non-persistent, 2=persistent
 			Priority:     0,
 		},
@@ -131,12 +131,11 @@ func (c *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
  * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args ...string) (<-chan amqp.Delivery, error) {
-	//connection to server
+	//连接服务器
 	err := c.openConnection()
 	if err != nil {
 		return nil, err
 	}
-	defer c.connection.Close()
 
 	channel, err := c.connection.Channel()
 	if err != nil {
@@ -160,11 +159,11 @@ func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args 
 		exchangeType = EXCHANGE_TYPE_DIRECT
 	}
 
-	//exchange declare
+	//声明交换机
 	err = channel.ExchangeDeclare(
-		exchange,           // name of the exchange
-		exchangeType,       // type
-		c.option.IsDurable, // durable
+		exchange,           // 交换机名称
+		exchangeType,       // 交换机类型
+		c.option.IsDurable, // 是否持久化
 		false,              // auto-deleted，delete when complete
 		false,              // internal
 		false,              // noWait
@@ -174,10 +173,10 @@ func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args 
 		return nil, err
 	}
 
-	//queue declare
+	//声明队列
 	queue, err := channel.QueueDeclare(
-		queueName,          // name
-		c.option.IsDurable, // durable
+		queueName,          // 队列名称
+		c.option.IsDurable, // 是否持久化
 		false,              // delete when unused
 		false,              // exclusive
 		false,              // no-wait
@@ -188,11 +187,11 @@ func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args 
 		return nil, err
 	}
 
-	//binding queue and bingingKey to exchange
+	//队列和路由键绑定到交换机
 	err = channel.QueueBind(
-		queue.Name, // name of the queue
-		bindingKey, // bindingKey routing key
-		exchange,   // sourceExchange
+		queue.Name, // 队列名称
+		bindingKey, // 绑定的路由键
+		exchange,   // 交换机名称
 		false,      // noWait
 		nil,        // arguments
 	)
@@ -200,9 +199,10 @@ func (c *rabbitMqClient) Consume(exchange, exchangeType, queueName string, args 
 		return nil, err
 	}
 
+	//返回消息通道
 	return channel.Consume(
-		queue.Name, // queue
-		tag,        // consumerTag,
+		queue.Name, // 队列名称
+		tag,        // 自定义Tag,
 		true,       // auto-ack
 		false,      // exclusive
 		false,      // no-local
@@ -234,10 +234,12 @@ func (c *rabbitMqClient) openConnection() error {
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 关闭
+ * 关闭连接
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (c *rabbitMqClient) Close() error {
-	err := c.connection.Close()
+	if c.connection == nil {
+		return nil
+	}
 
-	return err
+	return c.connection.Close()
 }
