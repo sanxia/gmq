@@ -12,20 +12,9 @@ import (
  * ================================================================================ */
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 消息服务器选项
- * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-type ServerOption struct {
-	Username string
-	Password string
-	Host     string
-	Port     int
-}
-
-/* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * IMessage消息接口
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type IMessage interface {
 	Publish(exchange, exchangeType, routingKey, body string) error
-	Consume(exchange, exchangeType, queueName string, args ...string) (<-chan amqp.Delivery, error)
-	Close() error
+	Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp.Delivery, error)
 }
