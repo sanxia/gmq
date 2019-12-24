@@ -1,7 +1,7 @@
 package gmq
 
 import (
-	"github.com/streadway/amqp"
+	amqp_api "github.com/streadway/amqp"
 )
 
 /* ================================================================================
@@ -16,5 +16,5 @@ import (
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type IMessage interface {
 	Publish(exchange, exchangeType, routingKey, body string) error
-	Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp.Delivery, error)
+	Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp_api.Delivery, error)
 }

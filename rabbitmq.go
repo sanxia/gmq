@@ -9,7 +9,7 @@ import (
 )
 
 import (
-	"github.com/streadway/amqp"
+	amqp_api "github.com/streadway/amqp"
 )
 
 /* ================================================================================
@@ -113,10 +113,10 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 		return err
 	}
 
-	msg := amqp.Publishing{
+	msg := amqp_api.Publishing{
 		Body:         []byte(body), //消息体内容
 		ContentType:  "text/plain",
-		DeliveryMode: amqp.Transient, // 1=non-persistent, 2=persistent
+		DeliveryMode: amqp_api.Transient, // 1=non-persistent, 2=persistent
 		Priority:     0,
 		Timestamp:    time.Now(),
 	}
@@ -136,7 +136,7 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
  * 接收消息
  * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp.Delivery, error) {
+func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp_api.Delivery, error) {
 	if s.option.IsSync {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -210,9 +210,9 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, 
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 连接消息服务器
+ * 打开连接
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) openConnection() (*amqp.Connection, error) {
+func (s *rabbitMqClient) openConnection() (*amqp_api.Connection, error) {
 	connection, err := s.connectionServer()
 
 	if err != nil {
@@ -221,7 +221,7 @@ func (s *rabbitMqClient) openConnection() (*amqp.Connection, error) {
 			retriedCount += 1
 
 			//重连
-			log.Printf("reConnection %d amqp.Dial error: %v", retriedCount, err)
+			log.Printf("reConnection %d amqp_api.Dial error: %v", retriedCount, err)
 
 			time.Sleep(3 * time.Second)
 
@@ -238,7 +238,7 @@ func (s *rabbitMqClient) openConnection() (*amqp.Connection, error) {
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 连接消息服务器
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) connectionServer() (*amqp.Connection, error) {
+func (s *rabbitMqClient) connectionServer() (*amqp_api.Connection, error) {
 	connectionString := fmt.Sprintf("amqp://%s:%s@%s:%d%s",
 		s.option.Username,
 		s.option.Password,
@@ -247,7 +247,7 @@ func (s *rabbitMqClient) connectionServer() (*amqp.Connection, error) {
 		s.option.Vhost,
 	)
 
-	return amqp.Dial(connectionString)
+	return amqp_api.Dial(connectionString)
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
