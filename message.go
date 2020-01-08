@@ -16,5 +16,5 @@ import (
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type IMessage interface {
 	Publish(exchange, exchangeType, routingKey, body string) error
-	Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp_api.Delivery, error)
+	Consume(exchange, exchangeType, routingKey, queueName string, args ...string) (<-chan amqp_api.Delivery, error)
 }

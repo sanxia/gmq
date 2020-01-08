@@ -3,6 +3,7 @@ package gmq
 import (
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,8 @@ var (
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type rabbitMqClient struct {
 	option     RabbitMqOption
+	conn       *amqp_api.Connection
+	errChan    chan error
 	retryCount int
 	mu         sync.Mutex
 }
@@ -68,8 +71,15 @@ func NewRabbitMq(option RabbitMqOption) IMessage {
 
 	client := &rabbitMqClient{
 		option:     option,
-		retryCount: 10,
+		errChan:    make(chan error, 0),
+		retryCount: 0,
 	}
+
+	if err := client.openConnection(); err != nil {
+		panic("rabbitmq conn err")
+	}
+
+	go client.monitorConnection()
 
 	return client
 }
@@ -84,19 +94,13 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 		defer s.mu.Unlock()
 	}
 
-	conn, err := s.openConnection()
+	channel, err := s.conn.Channel()
 	if err != nil {
+		s.errorHandler(err)
 		return err
 	}
 
-	defer conn.Close()
-
-	channel, err := conn.Channel()
-	if err != nil {
-		return err
-	}
-
-	if isSuccess := isExchangeType(exchangeType); !isSuccess {
+	if isSuccess := s.isExchangeType(exchangeType); !isSuccess {
 		exchangeType = EXCHANGE_TYPE_DIRECT
 	}
 
@@ -110,13 +114,14 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 		nil,                // arguments
 	)
 	if err != nil {
+		s.errorHandler(err)
 		return err
 	}
 
 	msg := amqp_api.Publishing{
 		Body:         []byte(body), //消息体内容
 		ContentType:  "text/plain",
-		DeliveryMode: amqp_api.Transient, // 1=non-persistent, 2=persistent
+		DeliveryMode: amqp_api.Persistent, // 1=non-persistent(Transient), 2=persistent(Persistent)
 		Priority:     0,
 		Timestamp:    time.Now(),
 	}
@@ -129,6 +134,10 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 		msg,
 	)
 
+	if err != nil {
+		s.errorHandler(err)
+	}
+
 	return err
 }
 
@@ -136,25 +145,19 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
  * 接收消息
  * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, tag string) (<-chan amqp_api.Delivery, error) {
+func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName string, args ...string) (<-chan amqp_api.Delivery, error) {
 	if s.option.IsSync {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 	}
 
-	conn, err := s.openConnection()
+	channel, err := s.conn.Channel()
 	if err != nil {
+		s.errorHandler(err)
 		return nil, err
 	}
 
-	defer conn.Close()
-
-	channel, err := conn.Channel()
-	if err != nil {
-		return nil, err
-	}
-
-	if isSuccess := isExchangeType(exchangeType); !isSuccess {
+	if isSuccess := s.isExchangeType(exchangeType); !isSuccess {
 		exchangeType = EXCHANGE_TYPE_DIRECT
 	}
 
@@ -169,6 +172,7 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, 
 		nil,                // arguments
 	)
 	if err != nil {
+		s.errorHandler(err)
 		return nil, err
 	}
 
@@ -176,12 +180,13 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, 
 	_, err = channel.QueueDeclare(
 		queueName,          // 队列名称
 		s.option.IsDurable, // 是否持久化
-		false,              // delete when unused
+		false,              // autoDelete when unused
 		false,              // exclusive
 		false,              // no-wait
 		nil,                // arguments
 	)
 	if err != nil {
+		s.errorHandler(err)
 		return nil, err
 	}
 
@@ -194,7 +199,13 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, 
 		nil,        // arguments
 	)
 	if err != nil {
+		s.errorHandler(err)
 		return nil, err
+	}
+
+	tag := ""
+	if len(args) > 0 {
+		tag = args[0]
 	}
 
 	//返回消息通道
@@ -212,27 +223,45 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName, 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 打开连接
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) openConnection() (*amqp_api.Connection, error) {
-	connection, err := s.connectionServer()
+func (s *rabbitMqClient) openConnection() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if err != nil {
+	var errResult error
+	if connection, err := s.connectionServer(); err == nil {
+		s.conn = connection
+	} else {
 		retriedCount := 0
-		for retriedCount < s.retryCount {
-			retriedCount += 1
 
-			//重连
-			log.Printf("reConnection %d amqp_api.Dial error: %v", retriedCount, err)
+		if s.retryCount > 0 {
+			for retriedCount < s.retryCount {
+				log.Printf("reconnection retried:%d, error: %v", retriedCount, err)
 
-			time.Sleep(3 * time.Second)
+				if connection, err = s.connectionServer(); err == nil {
+					s.conn = connection
+					break
+				}
 
-			connection, err = s.connectionServer()
-			if err == nil {
-				break
+				retriedCount += 1
+				time.Sleep(5 * time.Second)
+			}
+			errResult = fmt.Errorf("%s", "connection error")
+		} else {
+			for {
+				log.Printf("reconnection retried:%d, error: %v", retriedCount, err)
+
+				if connection, err = s.connectionServer(); err == nil {
+					s.conn = connection
+					break
+				}
+
+				retriedCount += 1
+				time.Sleep(5 * time.Second)
 			}
 		}
 	}
 
-	return connection, err
+	return errResult
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -251,9 +280,38 @@ func (s *rabbitMqClient) connectionServer() (*amqp_api.Connection, error) {
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ * 监视连接状态
+ * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
+func (s *rabbitMqClient) monitorConnection() {
+	for {
+		select {
+		case err := <-s.errChan:
+			if err != nil {
+				log.Printf("monitor connection err: %#v", err)
+
+				if err := s.openConnection(); err == nil {
+					log.Printf("monitor reconnection OK")
+				}
+			}
+		}
+	}
+}
+
+/* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ * 错误处理器
+ * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
+func (s *rabbitMqClient) errorHandler(err error) {
+	if opErr, isOk := err.(*net.OpError); isOk {
+		if strings.ToUpper(opErr.Net) == "TCP" {
+			s.errChan <- err
+		}
+	}
+}
+
+/* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 判断交换类型是否正确
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func isExchangeType(exchangeType string) bool {
+func (s *rabbitMqClient) isExchangeType(exchangeType string) bool {
 	isSuccess := false
 	for _, _exchangeType := range exchangeTypes {
 		if strings.ToLower(_exchangeType) == strings.ToLower(exchangeType) {
