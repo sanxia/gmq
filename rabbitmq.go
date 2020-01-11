@@ -45,13 +45,14 @@ type rabbitMqClient struct {
  * RabbitMqOption选项
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 type RabbitMqOption struct {
-	Username  string
-	Password  string
-	Host      string
-	Port      int
-	Vhost     string
-	IsDurable bool
-	IsSync    bool
+	Username     string
+	Password     string
+	Ip           string
+	Port         int
+	VirtualHost  string
+	Exchange     string
+	ExchangeType string
+	IsPersistent bool
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -64,9 +65,25 @@ func init() {
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 初始化RabbitMq Client
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func NewRabbitMq(option RabbitMqOption) IMessage {
-	if len(option.Vhost) == 0 {
-		option.Vhost = "/"
+func NewRabbitMq(option RabbitMqOption) IRabbitMessage {
+	if len(option.Ip) == 0 {
+		option.Ip = "127.0.0.1"
+	}
+
+	if option.Port <= 0 {
+		option.Port = 5672
+	}
+
+	if len(option.VirtualHost) == 0 {
+		option.VirtualHost = "/"
+	}
+
+	if len(option.Exchange) == 0 {
+		option.Exchange = "__gmq_default__"
+	}
+
+	if isSuccess := isExchangeType(option.ExchangeType); !isSuccess {
+		option.ExchangeType = EXCHANGE_TYPE_DIRECT
 	}
 
 	client := &rabbitMqClient{
@@ -86,32 +103,22 @@ func NewRabbitMq(option RabbitMqOption) IMessage {
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 发送消息
- * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string) error {
-	if s.option.IsSync {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-	}
-
+func (s *rabbitMqClient) Publish(routingKey, body string) error {
 	channel, err := s.conn.Channel()
 	if err != nil {
 		s.errorHandler(err)
 		return err
 	}
 
-	if isSuccess := s.isExchangeType(exchangeType); !isSuccess {
-		exchangeType = EXCHANGE_TYPE_DIRECT
-	}
-
 	err = channel.ExchangeDeclare(
-		exchange,           // 交换机名称
-		exchangeType,       // 交换机类型
-		s.option.IsDurable, // 是否持久化
-		false,              // auto-deleted
-		false,              // internal
-		false,              // noWait
-		nil,                // arguments
+		s.option.Exchange,     // 交换机名称
+		s.option.ExchangeType, // 交换机类型
+		s.option.IsPersistent, // 是否持久化
+		false,                 // auto-deleted
+		false,                 // internal
+		false,                 // noWait
+		nil,                   // arguments
 	)
 	if err != nil {
 		s.errorHandler(err)
@@ -119,18 +126,25 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 	}
 
 	msg := amqp_api.Publishing{
-		Body:         []byte(body), //消息体内容
-		ContentType:  "text/plain",
-		DeliveryMode: amqp_api.Persistent, // 1=non-persistent(Transient), 2=persistent(Persistent)
-		Priority:     0,
-		Timestamp:    time.Now(),
+		Body:        []byte(body), //消息体内容
+		ContentType: "text/plain",
+		Priority:    0,
+		Timestamp:   time.Now(),
+	}
+
+	// DeliveryMode: amqp_api.Persistent
+	// 1=non-persistent(Transient), 2=persistent(Persistent)
+	if s.option.IsPersistent {
+		msg.DeliveryMode = amqp_api.Persistent
+	} else {
+		msg.DeliveryMode = amqp_api.Transient
 	}
 
 	err = channel.Publish(
-		exchange,   // 交换机名称
-		routingKey, // 路由键
-		false,      // mandatory
-		false,      // immediate
+		s.option.Exchange, // 交换机名称
+		routingKey,        // 路由键
+		false,             // mandatory
+		false,             // immediate
 		msg,
 	)
 
@@ -143,33 +157,23 @@ func (s *rabbitMqClient) Publish(exchange, exchangeType, routingKey, body string
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 接收消息
- * exchangeType: direct | fanout | topic
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName string, args ...string) (<-chan amqp_api.Delivery, error) {
-	if s.option.IsSync {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-	}
-
+func (s *rabbitMqClient) Consume(routingKey, queueName string, args ...string) (<-chan amqp_api.Delivery, error) {
 	channel, err := s.conn.Channel()
 	if err != nil {
 		s.errorHandler(err)
 		return nil, err
 	}
 
-	if isSuccess := s.isExchangeType(exchangeType); !isSuccess {
-		exchangeType = EXCHANGE_TYPE_DIRECT
-	}
-
 	//声明交换机
 	err = channel.ExchangeDeclare(
-		exchange,           // 交换机名称
-		exchangeType,       // 交换机类型
-		s.option.IsDurable, // 是否持久化
-		false,              // auto-deleted，delete when complete
-		false,              // internal
-		false,              // noWait
-		nil,                // arguments
+		s.option.Exchange,     // 交换机名称
+		s.option.ExchangeType, // 交换机类型
+		s.option.IsPersistent, // 是否持久化
+		false,                 // auto-deleted，delete when complete
+		false,                 // internal
+		false,                 // noWait
+		nil,                   // arguments
 	)
 	if err != nil {
 		s.errorHandler(err)
@@ -178,12 +182,12 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName s
 
 	//声明队列
 	_, err = channel.QueueDeclare(
-		queueName,          // 队列名称
-		s.option.IsDurable, // 是否持久化
-		false,              // autoDelete when unused
-		false,              // exclusive
-		false,              // no-wait
-		nil,                // arguments
+		queueName,             // 队列名称
+		s.option.IsPersistent, // 是否持久化
+		false,                 // autoDelete when unused
+		false,                 // exclusive
+		false,                 // no-wait
+		nil,                   // arguments
 	)
 	if err != nil {
 		s.errorHandler(err)
@@ -192,11 +196,11 @@ func (s *rabbitMqClient) Consume(exchange, exchangeType, routingKey, queueName s
 
 	//队列和路由键绑定到交换机
 	err = channel.QueueBind(
-		queueName,  // 队列名称
-		routingKey, // 绑定的路由键
-		exchange,   // 交换机名称
-		false,      // noWait
-		nil,        // arguments
+		queueName,         // 队列名称
+		routingKey,        // 绑定的路由键
+		s.option.Exchange, // 交换机名称
+		false,             // noWait
+		nil,               // arguments
 	)
 	if err != nil {
 		s.errorHandler(err)
@@ -271,9 +275,9 @@ func (s *rabbitMqClient) connectionServer() (*amqp_api.Connection, error) {
 	connectionString := fmt.Sprintf("amqp://%s:%s@%s:%d%s",
 		s.option.Username,
 		s.option.Password,
-		s.option.Host,
+		s.option.Ip,
 		s.option.Port,
-		s.option.Vhost,
+		s.option.VirtualHost,
 	)
 
 	return amqp_api.Dial(connectionString)
@@ -311,12 +315,15 @@ func (s *rabbitMqClient) errorHandler(err error) {
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 判断交换类型是否正确
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqClient) isExchangeType(exchangeType string) bool {
+func isExchangeType(exchangeType string) bool {
 	isSuccess := false
-	for _, _exchangeType := range exchangeTypes {
-		if strings.ToLower(_exchangeType) == strings.ToLower(exchangeType) {
-			isSuccess = true
-			break
+
+	if len(exchangeType) > 0 {
+		for _, _exchangeType := range exchangeTypes {
+			if strings.ToLower(_exchangeType) == strings.ToLower(exchangeType) {
+				isSuccess = true
+				break
+			}
 		}
 	}
 
