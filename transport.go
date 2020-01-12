@@ -24,7 +24,7 @@ type (
 func NewRabbitMqTransport(channelName string, option RabbitMqOption) gevent.ITransport {
 	rmqTransport := &rabbitMqTransport{
 		routingKey: fmt.Sprintf("%s-%s", option.Exchange, channelName),
-		queue:      fmt.Sprintf("%s-queue", channelName),
+		queue:      fmt.Sprintf("%s", channelName),
 	}
 
 	rmqTransport.message = NewRabbitMq(option)
