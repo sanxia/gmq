@@ -52,6 +52,7 @@ type RabbitMqOption struct {
 	VirtualHost  string
 	Exchange     string
 	ExchangeType string
+	IsAutoAck    bool
 	IsPersistent bool
 }
 
@@ -196,9 +197,9 @@ func (s *rabbitMqClient) Consume(routingKey, queueName string, args ...string) (
 
 	//队列和路由键绑定到交换机
 	err = channel.QueueBind(
-		queueName,         // 队列名称
-		routingKey,        // 绑定的路由键
-		s.option.Exchange, // 交换机名称
+		queueName,         // queue anme
+		routingKey,        // binding route key
+		s.option.Exchange, // exchange name
 		false,             // noWait
 		nil,               // arguments
 	)
@@ -214,13 +215,13 @@ func (s *rabbitMqClient) Consume(routingKey, queueName string, args ...string) (
 
 	//返回消息通道
 	return channel.Consume(
-		queueName, // 队列名称
-		tag,       // 自定义Tag,
-		true,      // auto-ack
-		false,     // exclusive
-		false,     // no-local
-		false,     // no-wait
-		nil,       // args
+		queueName,          // queue anme
+		tag,                // tag,
+		s.option.IsAutoAck, // auto-ack
+		false,              // exclusive
+		false,              // no-local
+		false,              // no-wait
+		nil,                // args
 	)
 }
 

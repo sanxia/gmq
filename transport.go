@@ -15,6 +15,7 @@ type (
 		routingKey string
 		queue      string
 		message    IRabbitMessage
+		option     RabbitMqOption
 	}
 )
 
@@ -25,6 +26,7 @@ func NewRabbitMqTransport(channelName string, option RabbitMqOption) gevent.ITra
 	rmqTransport := &rabbitMqTransport{
 		routingKey: fmt.Sprintf("%s-%s", option.Exchange, channelName),
 		queue:      fmt.Sprintf("%s", channelName),
+		option:     option,
 	}
 
 	rmqTransport.message = NewRabbitMq(option)
@@ -35,44 +37,47 @@ func NewRabbitMqTransport(channelName string, option RabbitMqOption) gevent.ITra
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 实现gevent.ITransport接口
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqTransport) Load() *gevent.Event {
-	var event *gevent.Event
+func (s *rabbitMqTransport) Load(callback func(*gevent.Event) error) error {
+	deliverChan, err := s.message.Consume(s.routingKey, s.queue)
+	if err == nil {
+		for msg := range deliverChan {
+			if len(msg.Body) > 0 {
 
-	if deliverChan, err := s.message.Consume(s.routingKey, s.queue); err == nil {
-		select {
-		case msg := <-deliverChan:
-			if string(msg.Body) != "" {
-				msg.Ack(false)
-				event = s.unpackMessage(string(msg.Body))
+				if callback != nil {
+					if event := s.unpackMessage(string(msg.Body)); event != nil {
+						if err := callback(event); err == nil {
+							if !s.option.IsAutoAck {
+								msg.Ack(false)
+							}
+						} else {
+							if !s.option.IsAutoAck {
+								msg.Nack(false, true)
+							}
+						}
+					}
+				}
+
 			}
 		}
-
-		/*
-			for msg := range deliverChan {
-				if string(msg.Body) != "" {
-					msg.Ack(false)
-					event = s.unpackMessage(string(msg.Body))
-				}
-			}
-		*/
-	} else {
-		log.Printf("RabbitMqTransport get err: %v", err)
 	}
 
-	return event
+	return err
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  * 实现gevent.ITransport接口
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqTransport) Store(event *gevent.Event) {
+func (s *rabbitMqTransport) Store(event *gevent.Event) error {
 	if event != nil {
 		if eventJson := s.packMessage(event); len(eventJson) > 0 {
 			if err := s.message.Publish(s.routingKey, eventJson); err != nil {
-				log.Printf("RabbitMqTransport put err: %v", err)
+				log.Printf("RabbitMqTransport message publish err: %#v", err)
+				return err
 			}
 		}
 	}
+
+	return nil
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
