@@ -7,15 +7,15 @@ import (
 
 import (
 	"github.com/sanxia/gevent"
-	"github.com/sanxia/glib"
 )
 
 type (
 	rabbitMqTransport struct {
-		routingKey string
-		queue      string
-		message    IRabbitMessage
-		option     RabbitMqOption
+		routingKey    string
+		queue         string
+		message       IRabbitMessage
+		serialization gevent.ISerialization
+		option        RabbitMqOption
 	}
 )
 
@@ -24,9 +24,10 @@ type (
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func NewRabbitMqTransport(channelName string, option RabbitMqOption) gevent.ITransport {
 	rmqTransport := &rabbitMqTransport{
-		routingKey: fmt.Sprintf("%s-%s", option.Exchange, channelName),
-		queue:      fmt.Sprintf("%s", channelName),
-		option:     option,
+		routingKey:    fmt.Sprintf("%s-%s", option.Exchange, channelName),
+		queue:         fmt.Sprintf("%s", channelName),
+		serialization: gevent.NewDefaultSerialization(),
+		option:        option,
 	}
 
 	rmqTransport.message = NewRabbitMq(option)
@@ -35,7 +36,7 @@ func NewRabbitMqTransport(channelName string, option RabbitMqOption) gevent.ITra
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 实现gevent.ITransport接口
+ * gevent.ITransport load impl
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (s *rabbitMqTransport) Load(callback func(*gevent.Event) error) error {
 	deliverChan, err := s.message.Consume(s.routingKey, s.queue)
@@ -44,7 +45,7 @@ func (s *rabbitMqTransport) Load(callback func(*gevent.Event) error) error {
 			if len(msg.Body) > 0 {
 
 				if callback != nil {
-					if event := s.unpackMessage(string(msg.Body)); event != nil {
+					if event := s.serialization.Deserialize(string(msg.Body)); event != nil {
 						if err := callback(event); err == nil {
 							if !s.option.IsAutoAck {
 								msg.Ack(false)
@@ -65,11 +66,11 @@ func (s *rabbitMqTransport) Load(callback func(*gevent.Event) error) error {
 }
 
 /* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 实现gevent.ITransport接口
+ * gevent.ITransport store impl
  * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 func (s *rabbitMqTransport) Store(event *gevent.Event) error {
 	if event != nil {
-		if eventJson := s.packMessage(event); len(eventJson) > 0 {
+		if eventJson := s.serialization.Serialize(event); len(eventJson) > 0 {
 			if err := s.message.Publish(s.routingKey, eventJson); err != nil {
 				log.Printf("RabbitMqTransport message publish err: %#v", err)
 				return err
@@ -78,25 +79,4 @@ func (s *rabbitMqTransport) Store(event *gevent.Event) error {
 	}
 
 	return nil
-}
-
-/* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 打包事件数据
- * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqTransport) packMessage(event *gevent.Event) string {
-	eventJson, _ := glib.ToJson(event)
-	return eventJson
-}
-
-/* ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * 解包事件数据
- * ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-func (s *rabbitMqTransport) unpackMessage(body string) *gevent.Event {
-	var event *gevent.Event
-
-	if len(body) > 0 {
-		glib.FromJson(body, &event)
-	}
-
-	return event
 }
